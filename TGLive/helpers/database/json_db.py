@@ -1,59 +1,158 @@
+import os
 import json
-from pathlib import Path
-from asyncio import Lock
+import time
+import asyncio
+from typing import Optional
 
 
 class JsonPlaylistStore:
-    def __init__(self, file_path: str):
-        self.path = Path(file_path)
-        self.lock = Lock()
+    def __init__(self, file_path: str = "playlists.json"):
+        self.file_path = file_path
+        self._lock = asyncio.Lock()
 
-        if not self.path.exists():
-            self.path.write_text(json.dumps({}))
+        if not os.path.exists(self.file_path):
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump({}, f)
 
-    async def _read(self):
-        return json.loads(self.path.read_text())
+    def _key(self, chat_id: int | str) -> str:
+        return f"channel_{chat_id}"
 
-    async def _write(self, data):
-        self.path.write_text(json.dumps(data, indent=2))
+    async def _load_all_unlocked(self) -> dict:
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
 
-    async def load(self, chat_id: int):
-        async with self.lock:
-            data = await self._read()
-            row = data.get(str(chat_id), {})
-            return (
-                row.get("playlist", []),
-                row.get("latest_id"),
-                row.get("reverse", False),
-                row.get("channel_name"),
-            )
+    async def _save_all_unlocked(self, data: dict):
+        tmp = self.file_path + ".tmp"
 
-    async def save(self, chat_id, playlist, latest_id, reverse, channel_name=None):
-        async with self.lock:
-            data = await self._read()
-            data[str(chat_id)] = {
+        def format_entry(entry: dict, indent: int = 2) -> str:
+            lines = ["{"]
+            pad = " " * indent
+
+            items = list(entry.items())
+            for i, (k, v) in enumerate(items):
+                comma = "," if i < len(items) - 1 else ""
+
+                if k == "playlist":
+                    line = f'{pad}"{k}": {json.dumps(v, separators=(",", ":"))}{comma}'
+                else:
+                    line = f'{pad}"{k}": {json.dumps(v, ensure_ascii=False)}{comma}'
+
+                lines.append(line)
+
+            lines.append("}")
+            return "\n".join(lines)
+
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("{\n")
+            keys = list(data.keys())
+
+            for i, key in enumerate(keys):
+                comma = "," if i < len(keys) - 1 else ""
+                entry = format_entry(data[key], indent=4)
+                f.write(f'  "{key}": {entry}{comma}\n')
+
+            f.write("}")
+
+        os.replace(tmp, self.file_path)
+
+    async def load(self, chat_id: int | str) -> Optional[dict]:
+        async with self._lock:
+            data = await self._load_all_unlocked()
+            return data.get(self._key(chat_id))
+
+    async def append_new(
+        self,
+        chat_id,
+        new_ids,
+        reverse: bool,
+        channel_name: str | None = None,
+    ):
+        if not new_ids:
+            return
+
+        async with self._lock:
+            data = await self._load_all_unlocked()
+            key = self._key(chat_id)
+
+            entry = data.get(key, {
+                "chat_id": chat_id,
+                "playlist": [],
+                "last_started_id": None,
+                "last_completed_id": None,
+            })
+
+            playlist = entry["playlist"]
+
+            seen = set(playlist)
+            for vid in new_ids:
+                if vid not in seen:
+                    playlist.append(vid)
+                    seen.add(vid)
+
+            entry.update({
                 "playlist": playlist,
-                "latest_id": latest_id,
                 "reverse": reverse,
-                "channel_name": channel_name,
-            }
-            await self._write(data)
+                "updated_at": int(time.time()),
+            })
 
-    async def append_new(self, chat_id, new_ids, latest_id=None, reverse=False):
-        playlist, _, _, channel_name = await self.load(chat_id)
-        playlist.extend(new_ids)
-        await self.save(chat_id, playlist, latest_id, reverse, channel_name)
+            if channel_name:
+                entry["channel_name"] = channel_name
 
-    async def remove_video(self, chat_id, video_id):
-        playlist, latest_id, reverse, channel_name = await self.load(chat_id)
-        if video_id in playlist:
-            playlist.remove(video_id)
-            await self.save(chat_id, playlist, latest_id, reverse, channel_name)
+            data[key] = entry
+            await self._save_all_unlocked(data)
 
-    async def set_last_started(self, chat_id, video_id):
-        playlist, _, reverse, channel_name = await self.load(chat_id)
-        await self.save(chat_id, playlist, video_id, reverse, channel_name)
+    async def remove_video(self, chat_id, message_id: int):
+        async with self._lock:
+            data = await self._load_all_unlocked()
+            key = self._key(chat_id)
 
-    async def set_last_completed(self, chat_id, video_id):
-        playlist, _, reverse, channel_name = await self.load(chat_id)
-        await self.save(chat_id, playlist, video_id, reverse, channel_name)
+            entry = data.get(key)
+            if not entry:
+                return
+
+            entry["playlist"] = [
+                x for x in entry.get("playlist", []) if x != message_id
+            ]
+
+            if entry.get("last_started_id") == message_id:
+                entry["last_started_id"] = None
+            if entry.get("last_completed_id") == message_id:
+                entry["last_completed_id"] = None
+
+            entry["updated_at"] = int(time.time())
+            await self._save_all_unlocked(data)
+
+    async def set_last_started(self, chat_id, message_id: int):
+        async with self._lock:
+            data = await self._load_all_unlocked()
+            key = self._key(chat_id)
+
+            entry = data.setdefault(key, {
+                "chat_id": chat_id,
+                "playlist": [],
+                "last_completed_id": None,
+            })
+
+            entry["last_started_id"] = message_id
+            entry["updated_at"] = int(time.time())
+
+            await self._save_all_unlocked(data)
+
+    async def set_last_completed(self, chat_id, message_id: int):
+        async with self._lock:
+            data = await self._load_all_unlocked()
+            key = self._key(chat_id)
+
+            entry = data.setdefault(key, {
+                "chat_id": chat_id,
+                "playlist": [],
+            })
+
+            entry["last_completed_id"] = message_id
+            entry["updated_at"] = int(time.time())
+
+            await self._save_all_unlocked(data)
+
