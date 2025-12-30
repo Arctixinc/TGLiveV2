@@ -2,4 +2,5 @@ hls/
 log.txt
 __pycache__/
 *.pyc
+*/sessions
 playlists.json
