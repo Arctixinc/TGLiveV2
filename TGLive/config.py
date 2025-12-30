@@ -51,5 +51,4 @@ class Telegram:
     
     ]
     
-    DEBUG_MODE = False
     
