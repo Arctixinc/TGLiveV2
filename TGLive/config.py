@@ -53,6 +53,7 @@ class Telegram:
         525, 524, 523, 522, 521, 520, 519, 518, 517, 516,
     ]
     
-    DEBUG_MODE = getenv("DEBUG_MODE", "True")
+    DEBUG_MODE = getenv("DEBUG_MODE", "false").lower() == "true"
+
     
     

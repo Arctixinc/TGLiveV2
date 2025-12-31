@@ -125,7 +125,7 @@ class ClientManager:
                     cls.multi_clients[cid] = client
                     cls.work_loads[cid] = 0
 
-                    LOGGER.info(
+                    LOGGER.debug(
                         f"TGL Worker {cid} started | "
                         f"@{me.username if me.username else 'NoUsername'} | ID: {me.id}"
                     )
