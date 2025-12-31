@@ -3,6 +3,9 @@ import json
 import time
 import asyncio
 from typing import Optional, List
+from TGLive import get_logger
+
+log = get_logger(__name__)
 
 
 class JsonPlaylistStore:
@@ -13,6 +16,7 @@ class JsonPlaylistStore:
         if not os.path.exists(self.file_path):
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump({}, f)
+            log.info("created playlist file: %s", self.file_path)
 
     def _key(self, chat_id: int | str) -> str:
         return f"channel_{chat_id}"
@@ -21,7 +25,8 @@ class JsonPlaylistStore:
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            log.warning("load failed: %s", e)
             return {}
 
     async def _save_all(self, data: dict):
@@ -29,11 +34,14 @@ class JsonPlaylistStore:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp, self.file_path)
+        log.debug("saved playlist file")
 
     async def load(self, chat_id: int | str) -> Optional[dict]:
         async with self._lock:
             data = await self._load_all()
-            return data.get(self._key(chat_id))
+            entry = data.get(self._key(chat_id))
+            log.debug("load: chat=%s found=%s", chat_id, bool(entry))
+            return entry
 
     async def append_new(
         self,
@@ -59,10 +67,12 @@ class JsonPlaylistStore:
             playlist = entry["playlist"]
 
             seen = set(playlist)
+            added = 0
             for vid in sorted(set(new_ids)):
                 if vid not in seen:
                     playlist.append(vid)
                     seen.add(vid)
+                    added += 1
 
             entry["playlist"] = playlist
             entry["reverse"] = reverse
@@ -73,6 +83,14 @@ class JsonPlaylistStore:
 
             data[key] = entry
             await self._save_all(data)
+
+        log.info(
+            "append: chat=%s added=%s total=%s reverse=%s",
+            chat_id,
+            added,
+            len(playlist),
+            reverse,
+        )
 
     async def remove_video(self, chat_id: int | str, video_id: int):
         async with self._lock:
@@ -95,6 +113,8 @@ class JsonPlaylistStore:
             entry["updated_at"] = int(time.time())
             await self._save_all(data)
 
+        log.info("remove: chat=%s video=%s", chat_id, video_id)
+
     async def set_last_started(self, chat_id: int | str, video_id: int):
         async with self._lock:
             data = await self._load_all()
@@ -111,6 +131,8 @@ class JsonPlaylistStore:
 
             await self._save_all(data)
 
+        log.info("started: chat=%s video=%s", chat_id, video_id)
+
     async def set_last_completed(self, chat_id: int | str, video_id: int):
         async with self._lock:
             data = await self._load_all()
@@ -126,6 +148,8 @@ class JsonPlaylistStore:
 
             await self._save_all(data)
 
+        log.info("completed: chat=%s video=%s", chat_id, video_id)
+
     async def get_playlist(self, chat_id: int | str) -> List[int]:
         async with self._lock:
             data = await self._load_all()
@@ -136,6 +160,13 @@ class JsonPlaylistStore:
             playlist = entry.get("playlist", [])
 
             if entry.get("reverse", False):
-                return playlist[::-1]
+                playlist = playlist[::-1]
+
+            log.debug(
+                "get_playlist: chat=%s count=%s reverse=%s",
+                chat_id,
+                len(playlist),
+                entry.get("reverse", False),
+            )
 
             return playlist

@@ -1,6 +1,9 @@
 import time
 from typing import Optional, Tuple, List
 from motor.motor_asyncio import AsyncIOMotorClient
+from TGLive import get_logger
+
+log = get_logger(__name__)
 
 
 class MongoPlaylistStore:
@@ -10,13 +13,22 @@ class MongoPlaylistStore:
         self.col = self.db.playlists
 
         self.col.create_index("_id", unique=True)
+        log.info("mongo store ready (%s)", db_name)
 
     async def load(
         self, chat_id: int
     ) -> Tuple[List[int], Optional[int], Optional[int], bool, Optional[str]]:
         row = await self.col.find_one({"_id": chat_id})
         if not row:
+            log.debug("load: no data for %s", chat_id)
             return [], None, None, False, None
+
+        log.debug(
+            "load: chat=%s count=%s reverse=%s",
+            chat_id,
+            len(row.get("playlist", [])),
+            row.get("reverse", False),
+        )
 
         return (
             row.get("playlist", []),
@@ -60,6 +72,13 @@ class MongoPlaylistStore:
             upsert=True,
         )
 
+        log.info(
+            "append: chat=%s added=%s reverse=%s",
+            chat_id,
+            len(new_ids),
+            reverse,
+        )
+
     async def remove_video(self, chat_id: int, video_id: int):
         await self.col.update_one(
             {"_id": chat_id},
@@ -68,6 +87,8 @@ class MongoPlaylistStore:
                 "$set": {"updated_at": int(time.time())},
             },
         )
+
+        log.info("remove: chat=%s video=%s", chat_id, video_id)
 
     async def set_last_started(self, chat_id: int, video_id: int):
         await self.col.update_one(
@@ -85,6 +106,8 @@ class MongoPlaylistStore:
             upsert=True,
         )
 
+        log.info("started: chat=%s video=%s", chat_id, video_id)
+
     async def set_last_completed(self, chat_id: int, video_id: int):
         await self.col.update_one(
             {"_id": chat_id},
@@ -100,6 +123,8 @@ class MongoPlaylistStore:
             upsert=True,
         )
 
+        log.info("completed: chat=%s video=%s", chat_id, video_id)
+
     async def get_playlist(self, chat_id: int) -> List[int]:
         row = await self.col.find_one({"_id": chat_id})
         if not row:
@@ -108,6 +133,13 @@ class MongoPlaylistStore:
         playlist = row.get("playlist", [])
 
         if row.get("reverse", False):
-            return playlist[::-1]
+            playlist = playlist[::-1]
+
+        log.debug(
+            "get_playlist: chat=%s count=%s reverse=%s",
+            chat_id,
+            len(playlist),
+            row.get("reverse", False),
+        )
 
         return playlist
