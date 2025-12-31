@@ -1,7 +1,7 @@
 import time
 import asyncio
 import asyncpg
-from typing import Optional, List
+from typing import Optional, List, Dict
 from TGLive import get_logger
 
 log = get_logger(__name__)
@@ -40,13 +40,18 @@ class PostgresPlaylistStore:
         await self.connect()
         return self.pool.acquire()
 
-    async def load(self, chat_id: int | str) -> Optional[dict]:
+    async def load(self, chat_id: int | str) -> Optional[Dict]:
         async with await self._acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT playlist, reverse, last_started_id, last_completed_id
+                SELECT
+                    playlist,
+                    latest_id,
+                    reverse,
+                    last_started_id,
+                    last_completed_id
                 FROM playlists
-                WHERE chat_id=$1
+                WHERE chat_id = $1
                 """,
                 str(chat_id),
             )
@@ -55,13 +60,23 @@ class PostgresPlaylistStore:
                 log.debug("load: no data for %s", chat_id)
                 return None
 
-            log.debug("load: %s items for %s", len(row["playlist"]), chat_id)
-            return {
+            data = {
                 "playlist": list(row["playlist"]),
+                "latest_id": row["latest_id"] or 0,
                 "reverse": row["reverse"],
                 "last_started_id": row["last_started_id"],
                 "last_completed_id": row["last_completed_id"],
             }
+
+            log.debug(
+                "load: chat=%s items=%s latest_id=%s reverse=%s",
+                chat_id,
+                len(data["playlist"]),
+                data["latest_id"],
+                data["reverse"],
+            )
+
+            return data
 
     async def append_new(
         self,
@@ -73,12 +88,15 @@ class PostgresPlaylistStore:
             return
 
         new_ids = sorted(set(new_ids))
+        latest = max(new_ids)
 
         async with await self._acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO playlists (chat_id, playlist, reverse, updated_at)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO playlists
+                    (chat_id, playlist, latest_id, reverse, updated_at)
+                VALUES
+                    ($1, $2, $3, $4, $5)
                 ON CONFLICT (chat_id)
                 DO UPDATE SET
                     playlist = playlists.playlist ||
@@ -87,18 +105,26 @@ class PostgresPlaylistStore:
                             FROM unnest(EXCLUDED.playlist) AS e
                             WHERE NOT e = ANY(playlists.playlist)
                         ),
+                    latest_id = GREATEST(playlists.latest_id, EXCLUDED.latest_id),
                     reverse = EXCLUDED.reverse,
                     updated_at = EXCLUDED.updated_at
                 """,
                 str(chat_id),
                 new_ids,
+                latest,
                 reverse,
                 int(time.time()),
             )
 
-        log.info("append: %s ids to %s (reverse=%s)", len(new_ids), chat_id, reverse)
+        log.info(
+            "append: chat=%s added=%s latest_id=%s reverse=%s",
+            chat_id,
+            len(new_ids),
+            latest,
+            reverse,
+        )
 
-    async def remove_video(self, chat_id, message_id: int):
+    async def remove_video(self, chat_id: int | str, message_id: int):
         async with await self._acquire() as conn:
             await conn.execute(
                 """
@@ -121,14 +147,16 @@ class PostgresPlaylistStore:
                 int(time.time()),
             )
 
-        log.info("remove: %s from %s", message_id, chat_id)
+        log.info("remove: chat=%s video=%s", chat_id, message_id)
 
-    async def set_last_started(self, chat_id, message_id: int):
+    async def set_last_started(self, chat_id: int | str, message_id: int):
         async with await self._acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO playlists (chat_id, last_started_id, updated_at)
-                VALUES ($1, $2, $3)
+                INSERT INTO playlists
+                    (chat_id, last_started_id, updated_at)
+                VALUES
+                    ($1, $2, $3)
                 ON CONFLICT (chat_id)
                 DO UPDATE SET
                     last_started_id = EXCLUDED.last_started_id,
@@ -139,14 +167,16 @@ class PostgresPlaylistStore:
                 int(time.time()),
             )
 
-        log.info("started: %s -> %s", chat_id, message_id)
+        log.info("started: chat=%s video=%s", chat_id, message_id)
 
-    async def set_last_completed(self, chat_id, message_id: int):
+    async def set_last_completed(self, chat_id: int | str, message_id: int):
         async with await self._acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO playlists (chat_id, last_completed_id, updated_at)
-                VALUES ($1, $2, $3)
+                INSERT INTO playlists
+                    (chat_id, last_completed_id, updated_at)
+                VALUES
+                    ($1, $2, $3)
                 ON CONFLICT (chat_id)
                 DO UPDATE SET
                     last_completed_id = EXCLUDED.last_completed_id,
@@ -157,7 +187,7 @@ class PostgresPlaylistStore:
                 int(time.time()),
             )
 
-        log.info("completed: %s -> %s", chat_id, message_id)
+        log.info("completed: chat=%s video=%s", chat_id, message_id)
 
     async def get_playlist(self, chat_id: int | str) -> List[int]:
         row = await self.load(chat_id)
@@ -170,10 +200,11 @@ class PostgresPlaylistStore:
             playlist = playlist[::-1]
 
         log.debug(
-            "get playlist: %s items for %s (reverse=%s)",
-            len(playlist),
+            "get playlist: chat=%s items=%s latest_id=%s reverse=%s",
             chat_id,
-            row.get("reverse"),
+            len(playlist),
+            row["latest_id"],
+            row["reverse"],
         )
 
         return playlist

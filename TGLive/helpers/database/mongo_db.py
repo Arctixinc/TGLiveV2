@@ -1,5 +1,5 @@
 import time
-from typing import Optional, Tuple, List
+from typing import Optional, List, Dict
 from motor.motor_asyncio import AsyncIOMotorClient
 from TGLive import get_logger
 
@@ -15,32 +15,35 @@ class MongoPlaylistStore:
         self.col.create_index("_id", unique=True)
         log.info("mongo store ready (%s)", db_name)
 
-    async def load(
-        self, chat_id: int
-    ) -> Tuple[List[int], Optional[int], Optional[int], bool, Optional[str]]:
+    async def load(self, chat_id: int | str) -> Optional[Dict]:
         row = await self.col.find_one({"_id": chat_id})
         if not row:
             log.debug("load: no data for %s", chat_id)
-            return [], None, None, False, None
+            return None
+
+        data = {
+            "chat_id": chat_id,
+            "playlist": row.get("playlist", []),
+            "latest_id": row.get("latest_id", 0),
+            "last_started_id": row.get("last_started_id"),
+            "last_completed_id": row.get("last_completed_id"),
+            "reverse": row.get("reverse", False),
+            "channel_name": row.get("channel_name"),
+        }
 
         log.debug(
-            "load: chat=%s count=%s reverse=%s",
+            "load: chat=%s count=%s latest_id=%s reverse=%s",
             chat_id,
-            len(row.get("playlist", [])),
-            row.get("reverse", False),
+            len(data["playlist"]),
+            data["latest_id"],
+            data["reverse"],
         )
 
-        return (
-            row.get("playlist", []),
-            row.get("last_started_id"),
-            row.get("last_completed_id"),
-            row.get("reverse", False),
-            row.get("channel_name"),
-        )
+        return data
 
     async def append_new(
         self,
-        chat_id: int,
+        chat_id: int | str,
         new_ids: List[int],
         reverse: bool = False,
         channel_name: Optional[str] = None,
@@ -48,13 +51,14 @@ class MongoPlaylistStore:
         if not new_ids:
             return
 
-        # keep order old -> new
         new_ids = sorted(set(new_ids))
+        latest = max(new_ids)
 
         update = {
             "$push": {"playlist": {"$each": new_ids}},
             "$set": {
                 "reverse": reverse,
+                "latest_id": latest,
                 "updated_at": int(time.time()),
             },
             "$setOnInsert": {
@@ -73,13 +77,13 @@ class MongoPlaylistStore:
         )
 
         log.info(
-            "append: chat=%s added=%s reverse=%s",
+            "append: chat=%s added=%s latest_id=%s",
             chat_id,
             len(new_ids),
-            reverse,
+            latest,
         )
 
-    async def remove_video(self, chat_id: int, video_id: int):
+    async def remove_video(self, chat_id: int | str, video_id: int):
         await self.col.update_one(
             {"_id": chat_id},
             {
@@ -90,7 +94,7 @@ class MongoPlaylistStore:
 
         log.info("remove: chat=%s video=%s", chat_id, video_id)
 
-    async def set_last_started(self, chat_id: int, video_id: int):
+    async def set_last_started(self, chat_id: int | str, video_id: int):
         await self.col.update_one(
             {"_id": chat_id},
             {
@@ -100,6 +104,7 @@ class MongoPlaylistStore:
                 },
                 "$setOnInsert": {
                     "playlist": [],
+                    "latest_id": 0,
                     "last_completed_id": None,
                 },
             },
@@ -108,7 +113,7 @@ class MongoPlaylistStore:
 
         log.info("started: chat=%s video=%s", chat_id, video_id)
 
-    async def set_last_completed(self, chat_id: int, video_id: int):
+    async def set_last_completed(self, chat_id: int | str, video_id: int):
         await self.col.update_one(
             {"_id": chat_id},
             {
@@ -118,6 +123,7 @@ class MongoPlaylistStore:
                 },
                 "$setOnInsert": {
                     "playlist": [],
+                    "latest_id": 0,
                 },
             },
             upsert=True,
@@ -125,7 +131,7 @@ class MongoPlaylistStore:
 
         log.info("completed: chat=%s video=%s", chat_id, video_id)
 
-    async def get_playlist(self, chat_id: int) -> List[int]:
+    async def get_playlist(self, chat_id: int | str) -> List[int]:
         row = await self.col.find_one({"_id": chat_id})
         if not row:
             return []
@@ -136,9 +142,10 @@ class MongoPlaylistStore:
             playlist = playlist[::-1]
 
         log.debug(
-            "get_playlist: chat=%s count=%s reverse=%s",
+            "get_playlist: chat=%s count=%s latest_id=%s reverse=%s",
             chat_id,
             len(playlist),
+            row.get("latest_id", 0),
             row.get("reverse", False),
         )
 

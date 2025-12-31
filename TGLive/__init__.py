@@ -1,5 +1,6 @@
 from time import time
 from .version import get_version
+from .config import Telegram
 
 import logging
 from logging import FileHandler, StreamHandler, DEBUG, INFO, Formatter, getLogger, WARNING, ERROR
@@ -14,7 +15,7 @@ __author__ = "Arctix Inc."
 __license__ = "MIT"
 __copyright__ = "Copyright 2026, Arctix Inc."
 
-DEBUG_MODE = False
+DEBUG_MODE = Telegram.DEBUG_MODE
 IST = pytz.timezone("Asia/Kolkata")
 
 class ISTFormatter(Formatter):
@@ -22,7 +23,7 @@ class ISTFormatter(Formatter):
         dt = datetime.fromtimestamp(record.created, IST)
         return dt.strftime(datefmt or "%d-%b-%y %I:%M:%S %p")
 
-LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] - %(message)s"
+LOG_FORMAT = "[%(asctime)s] [%(levelname)s] [%(name)s] [%(filename)s:%(lineno)d] - %(message)s"
 
 def setup_logging():
     formatter = ISTFormatter(LOG_FORMAT)
@@ -60,4 +61,5 @@ __all__ = (
     "__license__",
     "setup_logging",
     "get_logger",
+    "Telegram",
 )

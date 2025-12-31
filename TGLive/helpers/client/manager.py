@@ -14,17 +14,15 @@ LOGGER = get_logger(__name__)
 
 class TokenParser:
     @staticmethod
-    def parse_from_config():
-        return {
-            i + 1: value
-            for i, (key, value) in enumerate(
-                sorted(
-                    (k, v)
-                    for k, v in vars(Telegram).items()
-                    if k.startswith("MULTI_TOKEN") and v
-                )
-            )
-        }
+    def parse_from_config() -> Dict[int, str]:
+        tokens = {}
+        for k, v in vars(Telegram).items():
+            if k.startswith("MULTI_TOKEN") and v:
+                try:
+                    tokens[int(k.replace("MULTI_TOKEN", ""))] = v
+                except ValueError:
+                    continue
+        return dict(sorted(tokens.items()))
 
 
 class ClientManager:
@@ -36,10 +34,17 @@ class ClientManager:
     work_loads: Dict[int, int] = {}
 
     BNAME: Optional[str] = None
-    ID: Optional[str] = None
+    ID: Optional[int] = None
     HNAME: Optional[str] = None
 
     _lock = asyncio.Lock()
+
+    BASE_KWARGS = dict(
+        parse_mode=enums.ParseMode.HTML,
+        workers=6,
+        sleep_threshold=30,
+        max_concurrent_transmissions=10,
+    )
 
     @classmethod
     async def start(cls):
@@ -47,42 +52,36 @@ class ClientManager:
             if cls.bot:
                 return
 
-            kwargs = {
-                "parse_mode": enums.ParseMode.HTML,
-                "max_concurrent_transmissions": 100,
-                "skip_updates": False,
-            }
-
             cls.bot = Client(
                 "sessions/TGL-Main",
                 api_id=Telegram.API_ID,
                 api_hash=Telegram.API_HASH,
                 bot_token=Telegram.BOT_TOKEN,
                 plugins={"root": "TGLive/plugins"},
-                **kwargs,
+                skip_updates=False,
+                **cls.BASE_KWARGS,
             )
             await cls.bot.start()
 
             cls.BNAME = cls.bot.me.username
-            cls.ID = Telegram.BOT_TOKEN.split(":", 1)[0]
-
-            LOGGER.info(f"TGL Bot : [@{cls.BNAME}] Started!")
+            cls.ID = int(Telegram.BOT_TOKEN.split(":", 1)[0])
+            LOGGER.info(f"TGL Bot started: @{cls.BNAME}")
 
             cls.helper = LiveTgClient(
                 "sessions/TGL-Helper",
                 api_id=Telegram.API_ID,
                 api_hash=Telegram.API_HASH,
                 bot_token=Telegram.HELPER_BOT_TOKEN,
-                **kwargs,
+                no_updates=True,
+                **cls.BASE_KWARGS,
             )
             await cls.helper.start()
 
             cls.HNAME = cls.helper.me.username if cls.helper.me else "Unknown"
-
             cls.multi_clients[0] = cls.helper
             cls.work_loads[0] = 0
 
-            LOGGER.info(f"TGL Helper : [@{cls.HNAME}] Started!")
+            LOGGER.info(f"TGL Helper started: @{cls.HNAME}")
 
     @classmethod
     async def start_user(cls):
@@ -95,7 +94,7 @@ class ClientManager:
                 api_id=Telegram.API_ID,
                 api_hash=Telegram.API_HASH,
                 session_string=Telegram.USER_SESSION,
-                parse_mode=enums.ParseMode.HTML,
+                **cls.BASE_KWARGS,
             )
             await cls.user.start()
 
@@ -118,15 +117,18 @@ class ClientManager:
                         api_hash=Telegram.API_HASH,
                         bot_token=token,
                         no_updates=True,
-                        parse_mode=enums.ParseMode.HTML,
-                        max_concurrent_transmissions=100,
+                        **cls.BASE_KWARGS,
                     )
                     await client.start()
 
+                    me = client.me
                     cls.multi_clients[cid] = client
                     cls.work_loads[cid] = 0
 
-                    LOGGER.info(f"TGL Worker {cid} : [{name}] Started")
+                    LOGGER.info(
+                        f"TGL Worker {cid} started | "
+                        f"@{me.username if me.username else 'NoUsername'} | ID: {me.id}"
+                    )
 
                 except AccessTokenExpired:
                     LOGGER.warning(f"[Worker {cid}] Token expired")
@@ -138,7 +140,7 @@ class ClientManager:
                 except Exception:
                     LOGGER.exception(f"[Worker {cid}] Failed to start")
 
-            LOGGER.info(f"Worker clients active: {list(cls.multi_clients.keys())}")
+            LOGGER.info(f"Active workers: {list(cls.multi_clients.keys())}")
 
     @classmethod
     async def stop(cls):
@@ -152,13 +154,12 @@ class ClientManager:
                 cls.user = None
 
             if cls.multi_clients:
-                await gather(*[c.stop() for c in cls.multi_clients.values()])
+                await gather(*(c.stop() for c in cls.multi_clients.values()))
                 cls.multi_clients.clear()
                 cls.work_loads.clear()
 
             cls.helper = None
-
-            LOGGER.info("All Client(s) stopped")
+            LOGGER.info("All clients stopped")
 
     @classmethod
     async def reload(cls):
@@ -170,6 +171,6 @@ class ClientManager:
                 await cls.user.restart()
 
             if cls.multi_clients:
-                await gather(*[c.restart() for c in cls.multi_clients.values()])
+                await gather(*(c.restart() for c in cls.multi_clients.values()))
 
-            LOGGER.info("All Client(s) restarted")
+            LOGGER.info("All clients restarted")

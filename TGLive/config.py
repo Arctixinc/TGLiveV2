@@ -44,6 +44,7 @@ class Telegram:
     MULTI_TOKEN11="8284724201:AAGpnjh2Lc49vOnFy58Wp2L2R7pHv1CsOWA" 
     MULTI_TOKEN12="8481382132:AAElISWYSP-jZPFCDrix5CYxATrbbGmgJjo"
     MULTI_TOKEN13="8130057136:AAGnsTvIQYViQxEi7ZZo94UeI1H2a6ekln0"
+    MULTI_TOKEN14="6732118607:AAHObBAezceVQTivgZrPx4Yo6EchsOD5S-M"
 
     PRE_PLAYLIST = [
         564, 563, 562, 561, 560, 559, 558, 557,
@@ -51,5 +52,7 @@ class Telegram:
         535, 534, 533, 532, 531, 530, 529, 528, 527, 526,
         525, 524, 523, 522, 521, 520, 519, 518, 517, 516,
     ]
+    
+    DEBUG_MODE = getenv("DEBUG_MODE", "True")
     
     

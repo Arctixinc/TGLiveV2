@@ -23,6 +23,8 @@ class JsonPlaylistStore:
 
     async def _load_all(self) -> dict:
         try:
+            if os.path.getsize(self.file_path) == 0:
+                return {}
             with open(self.file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
@@ -31,8 +33,36 @@ class JsonPlaylistStore:
 
     async def _save_all(self, data: dict):
         tmp = self.file_path + ".tmp"
+
+        def format_entry(entry: dict, indent: int = 2) -> str:
+            lines = ["{"]
+            pad = " " * indent
+
+            items = list(entry.items())
+            for i, (k, v) in enumerate(items):
+                comma = "," if i < len(items) - 1 else ""
+
+                if k == "playlist":
+                    line = f'{pad}"{k}": {json.dumps(v, separators=(",", ":"))}{comma}'
+                else:
+                    line = f'{pad}"{k}": {json.dumps(v, ensure_ascii=False)}{comma}'
+
+                lines.append(line)
+
+            lines.append("}")
+            return "\n".join(lines)
+
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("{\n")
+            keys = list(data.keys())
+
+            for i, key in enumerate(keys):
+                comma = "," if i < len(keys) - 1 else ""
+                entry = format_entry(data[key], indent=4)
+                f.write(f'  "{key}": {entry}{comma}\n')
+
+            f.write("}")
+
         os.replace(tmp, self.file_path)
         log.debug("saved playlist file")
 
@@ -60,13 +90,14 @@ class JsonPlaylistStore:
             entry = data.get(key, {
                 "chat_id": chat_id,
                 "playlist": [],
+                "latest_id": 0,
                 "last_started_id": None,
                 "last_completed_id": None,
             })
 
             playlist = entry["playlist"]
-
             seen = set(playlist)
+
             added = 0
             for vid in sorted(set(new_ids)):
                 if vid not in seen:
@@ -75,6 +106,10 @@ class JsonPlaylistStore:
                     added += 1
 
             entry["playlist"] = playlist
+            entry["latest_id"] = max(
+                entry.get("latest_id", 0),
+                max(new_ids),
+            )
             entry["reverse"] = reverse
             entry["updated_at"] = int(time.time())
 
@@ -85,11 +120,11 @@ class JsonPlaylistStore:
             await self._save_all(data)
 
         log.info(
-            "append: chat=%s added=%s total=%s reverse=%s",
+            "append: chat=%s added=%s total=%s latest_id=%s",
             chat_id,
             added,
             len(playlist),
-            reverse,
+            entry["latest_id"],
         )
 
     async def remove_video(self, chat_id: int | str, video_id: int):
@@ -101,9 +136,7 @@ class JsonPlaylistStore:
             if not entry:
                 return
 
-            entry["playlist"] = [
-                x for x in entry.get("playlist", []) if x != video_id
-            ]
+            entry["playlist"] = [x for x in entry["playlist"] if x != video_id]
 
             if entry.get("last_started_id") == video_id:
                 entry["last_started_id"] = None
@@ -123,12 +156,12 @@ class JsonPlaylistStore:
             entry = data.setdefault(key, {
                 "chat_id": chat_id,
                 "playlist": [],
+                "latest_id": 0,
                 "last_completed_id": None,
             })
 
             entry["last_started_id"] = video_id
             entry["updated_at"] = int(time.time())
-
             await self._save_all(data)
 
         log.info("started: chat=%s video=%s", chat_id, video_id)
@@ -141,11 +174,11 @@ class JsonPlaylistStore:
             entry = data.setdefault(key, {
                 "chat_id": chat_id,
                 "playlist": [],
+                "latest_id": 0,
             })
 
             entry["last_completed_id"] = video_id
             entry["updated_at"] = int(time.time())
-
             await self._save_all(data)
 
         log.info("completed: chat=%s video=%s", chat_id, video_id)
@@ -163,10 +196,10 @@ class JsonPlaylistStore:
                 playlist = playlist[::-1]
 
             log.debug(
-                "get_playlist: chat=%s count=%s reverse=%s",
+                "get_playlist: chat=%s count=%s latest_id=%s",
                 chat_id,
                 len(playlist),
-                entry.get("reverse", False),
+                entry.get("latest_id", 0),
             )
 
             return playlist
