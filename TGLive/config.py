@@ -13,7 +13,8 @@ class Telegram:
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8000"))
     DATABASE_URL = getenv("DATABASE_URL", "mongodb+srv://sibuna123:sibuna123@personalproject.rb8q7.mongodb.net")
-    POSTGRES_URL = getenv("POSTGRES_URL", "postgresql://neondb_owner:npg_xG9uCmRUTOQ0@ep-royal-bar-a4s9a4y7-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require")
+    # POSTGRES_URL = getenv("POSTGRES_URL", "postgresql://neondb_owner:npg_xG9uCmRUTOQ0@ep-royal-bar-a4s9a4y7-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require")
+    POSTGRES_URL = getenv("POSTGRES_URL", "postgresql://neondb_owner:npg_xG9uCmRUTOQ0@ep-lively-bonus-a4juxhe2-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
 
 
     UPSTREAM_REPO = getenv("UPSTREAM_REPO", "")

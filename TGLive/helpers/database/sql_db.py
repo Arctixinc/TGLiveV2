@@ -2,6 +2,9 @@ from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import Column, BigInteger, Boolean, Text, select
+from TGLive import get_logger
+
+log = get_logger(__name__)
 
 Base = declarative_base()
 
@@ -29,6 +32,7 @@ class SQLPlaylistStore:
     async def init(self):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        log.info("tables ready")
 
     @staticmethod
     def _encode_playlist(playlist: List[int]) -> str:
@@ -50,7 +54,10 @@ class SQLPlaylistStore:
             row = result.scalar_one_or_none()
 
             if not row:
+                log.debug("load: no data for %s", chat_id)
                 return [], None, None, False, None
+
+            log.debug("load: %s items for %s", len(row.playlist.split(",")) if row.playlist else 0, chat_id)
 
             return (
                 self._decode_playlist(row.playlist),
@@ -70,6 +77,9 @@ class SQLPlaylistStore:
         if not new_ids:
             return
 
+        # Mongo-style: sort + dedupe before append
+        new_ids = sorted(set(new_ids))
+
         async with self.Session() as session:
             row = await session.get(PlaylistTable, chat_id)
 
@@ -79,10 +89,12 @@ class SQLPlaylistStore:
                 playlist = []
 
             seen = set(playlist)
+            added = 0
             for vid in new_ids:
                 if vid not in seen:
                     playlist.append(vid)
                     seen.add(vid)
+                    added += 1
 
             if row:
                 row.playlist = self._encode_playlist(playlist)
@@ -100,6 +112,8 @@ class SQLPlaylistStore:
                 )
 
             await session.commit()
+
+        log.info("append: %s ids to %s (added=%s, reverse=%s)", len(new_ids), chat_id, added, reverse)
 
     async def remove_video(self, chat_id: int, video_id: int):
         async with self.Session() as session:
@@ -121,6 +135,8 @@ class SQLPlaylistStore:
             row.playlist = self._encode_playlist(playlist)
             await session.commit()
 
+        log.info("remove: %s from %s", video_id, chat_id)
+
     async def set_last_started(self, chat_id: int, video_id: int):
         async with self.Session() as session:
             row = await session.get(PlaylistTable, chat_id)
@@ -138,6 +154,8 @@ class SQLPlaylistStore:
 
             await session.commit()
 
+        log.info("started: %s -> %s", chat_id, video_id)
+
     async def set_last_completed(self, chat_id: int, video_id: int):
         async with self.Session() as session:
             row = await session.get(PlaylistTable, chat_id)
@@ -154,3 +172,20 @@ class SQLPlaylistStore:
                 )
 
             await session.commit()
+
+        log.info("completed: %s -> %s", chat_id, video_id)
+
+    async def get_playlist(self, chat_id: int) -> List[int]:
+        playlist, _, _, reverse, _ = await self.load(chat_id)
+
+        if reverse:
+            playlist = playlist[::-1]
+
+        log.debug(
+            "get_playlist: %s items for %s (reverse=%s)",
+            len(playlist),
+            chat_id,
+            reverse,
+        )
+
+        return playlist

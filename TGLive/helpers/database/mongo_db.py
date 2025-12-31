@@ -36,8 +36,11 @@ class MongoPlaylistStore:
         if not new_ids:
             return
 
+        # keep order old -> new
+        new_ids = sorted(set(new_ids))
+
         update = {
-            "$addToSet": {"playlist": {"$each": new_ids}},
+            "$push": {"playlist": {"$each": new_ids}},
             "$set": {
                 "reverse": reverse,
                 "updated_at": int(time.time()),
@@ -96,3 +99,15 @@ class MongoPlaylistStore:
             },
             upsert=True,
         )
+
+    async def get_playlist(self, chat_id: int) -> List[int]:
+        row = await self.col.find_one({"_id": chat_id})
+        if not row:
+            return []
+
+        playlist = row.get("playlist", [])
+
+        if row.get("reverse", False):
+            return playlist[::-1]
+
+        return playlist
