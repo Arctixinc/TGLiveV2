@@ -6,44 +6,45 @@ from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
 from TGLive.helpers.client import ClientManager
 from TGLive.helpers.playlist import VideoPlaylistManager
 from TGLive.helpers.database import JsonPlaylistStore
+from TGLive.web.server import start_server
 
 
 async def main():
     setup_logging()
     logger = get_logger(__name__)
-    logger.info(f"Starting {__title__} version {__version__}...")
+    logger.info("Starting %s version %s...", __title__, __version__)
 
     await gather(
         ClientManager.start(),
         ClientManager.start_multi_clients(),
     )
 
-    store = JsonPlaylistStore()
-    client = ClientManager.multi_clients.get(14)
+    worker_id = 10
+    client = ClientManager.multi_clients.get(worker_id)
 
     if not client:
-        raise RuntimeError("Client 14 not found")
+        raise RuntimeError(f"Client {worker_id} not found")
 
     logger.info(
         "Using client | index=%s | session=%s | username=%s",
-        14,
+        worker_id,
         client.name,
         getattr(client.me, "username", None),
     )
 
+    store = JsonPlaylistStore()
 
     manager = VideoPlaylistManager(
         client=client,
-        chat_id=Telegram.BEN_ID,
+        chat_id=Telegram.LOCAL_ID,
         store=store,
     )
 
-    # ✅ build/load playlist
     await manager.build()
-
-    # ✅ get playlist via manager
     playlist = manager.get_playlist()
-    logger.info("Playlist for BEN_ID: %s", playlist)
+    logger.info("Playlist loaded (%d items)", len(playlist))
+
+    await start_server(port=8000)
 
     await idle()
 
