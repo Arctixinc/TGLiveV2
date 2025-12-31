@@ -19,3 +19,7 @@ async def start_server(port: int = 8000):
     await site.start()
 
     return runner
+
+async def stop_server(runner: web.AppRunner):
+    if runner is not None:
+        await runner.cleanup()
