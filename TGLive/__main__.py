@@ -113,6 +113,8 @@ async def main():
         # stop playlist auto checker
         manager.stop()
 
+        await multi_streamer.stop()
+
         # stop stream task
         stream_task.cancel()
         try:

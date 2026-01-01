@@ -23,6 +23,9 @@ class ByteStreamer:
         self.clean_timer = 30 * 60
         self.client: Client = client
         self.__cached_file_ids: Dict[int, FileId] = {}
+        
+        self._clean_task: asyncio.Task | None = None
+        self._running = True
 
         LOGGER.debug(
             "[ByteStreamer.__init__] clean_timer=%s client_id=%s",
@@ -30,7 +33,7 @@ class ByteStreamer:
             getattr(client, "name", None),
         )
 
-        asyncio.create_task(self.clean_cache())
+        self._clean_task = asyncio.create_task(self.clean_cache())
         LOGGER.debug("[ByteStreamer.__init__] Cache cleaner task started")
 
     # ---------------------------------------------------------
@@ -320,15 +323,38 @@ class ByteStreamer:
     # CACHE CLEANER
     # ---------------------------------------------------------
     async def clean_cache(self):
-        LOGGER.debug("[clean_cache] cache cleaner loop started")
+        LOGGER.debug("[clean_cache] started")
 
-        while True:
-            await asyncio.sleep(self.clean_timer)
+        try:
+            while self._running:
+                await asyncio.sleep(self.clean_timer)
 
-            size_before = len(self.__cached_file_ids)
-            self.__cached_file_ids.clear()
+                size_before = len(self.__cached_file_ids)
+                self.__cached_file_ids.clear()
 
-            LOGGER.debug(
-                "[clean_cache] cache cleared previous_size=%s",
-                size_before,
-            )
+                LOGGER.debug(
+                    "[clean_cache] cleared cache size=%s",
+                    size_before,
+                )
+
+        except asyncio.CancelledError:
+            LOGGER.debug("[clean_cache] cancelled")
+            raise
+
+    # ---------------------------------------------------------
+    # STOP
+    # ---------------------------------------------------------
+    async def stop(self):
+        self._running = False
+
+        if self._clean_task:
+            self._clean_task.cancel()
+            try:
+                await self._clean_task
+            except asyncio.CancelledError:
+                pass
+
+            self._clean_task = None
+
+        LOGGER.debug("[ByteStreamer] stopped")
+

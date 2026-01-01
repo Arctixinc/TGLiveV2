@@ -46,6 +46,22 @@ class MultiClientStreamer:
                 )
         except asyncio.CancelledError:
             pass
+    
+    async def stop(self):
+        LOGGER.warning("MultiClientStreamer stopping ByteStreamers")
+
+        for index, bs in self._bs_cache.items():
+            try:
+                await bs.stop()
+                LOGGER.debug("ByteStreamer stopped (client=%s)", index)
+            except Exception as e:
+                LOGGER.warning(
+                    "Failed to stop ByteStreamer (client=%s): %s",
+                    index,
+                    e,
+                )
+
+        self._bs_cache.clear()
 
     async def stream_video(
         self,
