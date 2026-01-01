@@ -6,7 +6,7 @@ from .ffmpeg_registry import FFMPEG_PROCS
 LOGGER = get_logger(__name__)
 
 
-async def stop_all_ffmpeg():
+async def stop_all_ffmpeg(timeout: int = 5):
     LOGGER.info("[FFMPEG] stopping all ffmpeg processes")
 
     procs = list(FFMPEG_PROCS)
@@ -19,9 +19,15 @@ async def stop_all_ffmpeg():
         except Exception:
             pass
 
-    await asyncio.gather(
-        *(proc.wait() for proc in procs),
-        return_exceptions=True,
-    )
+    for proc in procs:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            LOGGER.warning(
+                "[FFMPEG] force killing ffmpeg pid=%s", proc.pid
+            )
+            proc.kill()
+        except Exception:
+            pass
 
     LOGGER.info("[FFMPEG] all ffmpeg processes stopped")

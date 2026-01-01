@@ -59,6 +59,10 @@ class MultiClientStreamer:
         bs = self._get_bs(index)
         ClientManager.work_loads[index] = ClientManager.work_loads.get(index, 0) + 1
 
+        ffmpeg = None
+        pump_task = None
+        stderr_task = None
+
         try:
             file_id = await bs.get_file_properties(chat_id, message_id)
             file_size = file_id.file_size or 0
@@ -93,18 +97,41 @@ class MultiClientStreamer:
             )
 
             async def pump():
-                async for chunk in bs.yield_file(
-                    file_id=file_id,
-                    index=index,
-                    offset=start_offset,
-                    first_part_cut=0,
-                    last_part_cut=last_part_cut,
-                    part_count=part_count,
-                    chunk_size=chunk_size,
-                ):
-                    ffmpeg.stdin.write(chunk)
-                    await ffmpeg.stdin.drain()
-                ffmpeg.stdin.close()
+                try:
+                    async for chunk in bs.yield_file(
+                        file_id=file_id,
+                        index=index,
+                        offset=start_offset,
+                        first_part_cut=0,
+                        last_part_cut=last_part_cut,
+                        part_count=part_count,
+                        chunk_size=chunk_size,
+                    ):
+                        if ffmpeg.stdin.is_closing():
+                            break
+
+                        try:
+                            ffmpeg.stdin.write(chunk)
+                            await ffmpeg.stdin.drain()
+                        except (BrokenPipeError, ConnectionResetError):
+                            LOGGER.warning(
+                                "[%s] ffmpeg stdin closed, stopping pump",
+                                stream_name,
+                            )
+                            break
+
+                except asyncio.CancelledError:
+                    LOGGER.debug("[%s] pump cancelled", stream_name)
+
+                except Exception as e:
+                    LOGGER.error("[%s] pump error: %s", stream_name, e)
+
+                finally:
+                    try:
+                        if ffmpeg.stdin and not ffmpeg.stdin.is_closing():
+                            ffmpeg.stdin.close()
+                    except Exception:
+                        pass
 
             pump_task = asyncio.create_task(pump())
 
@@ -114,12 +141,28 @@ class MultiClientStreamer:
                     break
                 yield data
 
-            await pump_task
-            await ffmpeg.wait()
-            stderr_task.cancel()
-            FFMPEG_PROCS.discard(ffmpeg)
+        finally:
+            # Cancel pump safely
+            if pump_task:
+                pump_task.cancel()
+                try:
+                    await pump_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Wait for ffmpeg exit
+            if ffmpeg:
+                try:
+                    await ffmpeg.wait()
+                except Exception:
+                    pass
+                FFMPEG_PROCS.discard(ffmpeg)
+
+            if stderr_task:
+                stderr_task.cancel()
+
+            ClientManager.work_loads[index] = max(
+                0, ClientManager.work_loads.get(index, 1) - 1
+            )
 
             LOGGER.info("[%s] clean ffmpeg exited", stream_name)
-
-        finally:
-            ClientManager.work_loads[index] = max(0, ClientManager.work_loads.get(index, 1) - 1)
