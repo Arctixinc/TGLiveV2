@@ -64,7 +64,7 @@ async def main():
 
     manager = VideoPlaylistManager(
         client=client,
-        chat_id=Telegram.BEN_ID,
+        chat_id=Telegram.LOCAL_ID,
         store=store,
         auto_checker=True,
     )

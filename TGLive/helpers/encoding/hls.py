@@ -15,9 +15,12 @@ async def start_hls_runner(ts_source, hls_dir: str, stream_name: str):
     os.makedirs(hls_dir, exist_ok=True)
 
     playlist_path = os.path.join(hls_dir, "live.m3u8")
-    segment_pattern = os.path.join(hls_dir, "%d.ts")
 
-    # ✅ REAL HLS COMMAND
+    # ✅ cross-platform timestamp (NO %s)
+    segment_pattern = os.path.join(
+        hls_dir, "%Y%m%d%H%M%S.ts"
+    )
+
     cmd = [
         "ffmpeg",
         "-re",
@@ -36,7 +39,11 @@ async def start_hls_runner(ts_source, hls_dir: str, stream_name: str):
         "-hls_time", "4",
         "-hls_list_size", "10",
         "-hls_flags", "delete_segments+append_list",
+
+        # 🔑 REQUIRED
+        "-strftime", "1",
         "-hls_segment_filename", segment_pattern,
+
         playlist_path,
     ]
 
