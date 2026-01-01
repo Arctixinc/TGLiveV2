@@ -11,11 +11,9 @@ from TGLive.helpers.playlist import (
     PlaylistStreamGenerator,
 )
 from TGLive.helpers.database import JsonPlaylistStore
-from TGLive.helpers.ffmpeg import (
-    start_hls_runner,
-    stop_all_ffmpeg,
-    MultiClientStreamer,
-)
+from TGLive.helpers.encoding.hls import start_hls_runner
+from TGLive.helpers.process.stop_all import stop_all_ffmpeg
+from TGLive.helpers.streaming.streamer import MultiClientStreamer
 from TGLive.helpers.ext_utils import clean_hls_folder
 from TGLive.web.server import start_server, stop_server
 
@@ -66,7 +64,7 @@ async def main():
 
     manager = VideoPlaylistManager(
         client=client,
-        chat_id=Telegram.LOCAL_ID,
+        chat_id=Telegram.BEN_ID,
         store=store,
         auto_checker=True,
     )

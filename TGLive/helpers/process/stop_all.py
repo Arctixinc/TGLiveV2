@@ -1,7 +1,7 @@
 import asyncio
 
 from TGLive import get_logger
-from .ffmpeg_registry import FFMPEG_PROCS
+from .registry import FFMPEG_PROCS
 
 LOGGER = get_logger(__name__)
 
