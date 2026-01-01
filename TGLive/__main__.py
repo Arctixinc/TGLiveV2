@@ -3,9 +3,29 @@ from asyncio import gather
 from pyrogram import idle
 
 from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
-from TGLive.helpers.client import ClientManager
-from TGLive.helpers.playlist import VideoPlaylistManager
-from TGLive.helpers.database import JsonPlaylistStore
+from TGLive.helpers.client import (
+    ClientManager,
+)
+
+from TGLive.helpers.playlist import (
+    VideoPlaylistManager,
+    PlaylistStreamGenerator
+)
+
+from TGLive.helpers.database import (
+    JsonPlaylistStore,
+    MongoPlaylistStore,
+    SQLPlaylistStore,
+    PostgresPlaylistStore,
+)
+
+from TGLive.helpers.ffmpeg import (
+    stop_all_ffmpeg,
+    start_hls_runner,
+    MultiClientStreamer,
+    FFMPEG_PROCS,
+)
+
 from TGLive.web.server import start_server
 
 
@@ -40,9 +60,19 @@ async def main():
         store=store,
     )
 
-    await manager.build()
-    playlist = manager.get_playlist()
-    logger.info("Playlist loaded (%d items)", len(playlist))
+    await manager.build()    
+    ms = MultiClientStreamer()
+    pg = PlaylistStreamGenerator(playlist_manager=manager, multi_streamer=ms, stream_name="main")
+    
+    
+    def make_stream(gen, hls, sname):
+                async def _run(gen=gen, hls=hls, sname=sname):
+                    await start_hls_runner(gen(), hls, stream_name=sname)
+                return _run
+
+    stream_factory = make_stream(pg.generator, "stream1", "stream1")
+            
+
 
     await start_server(port=8000)
 
