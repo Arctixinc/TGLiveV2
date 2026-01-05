@@ -117,6 +117,7 @@ class ClientManager:
                         api_hash=Telegram.API_HASH,
                         bot_token=token,
                         no_updates=True,
+                        in_memory=True,
                         **cls.BASE_KWARGS,
                     )
                     await client.start()
