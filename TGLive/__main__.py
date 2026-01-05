@@ -4,14 +4,12 @@ from asyncio import gather
 from pyrogram import idle
 
 from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
-
 from TGLive.helpers.client import ClientManager
-from TGLive.helpers.playlist import (
-    VideoPlaylistManager,
-    PlaylistStreamGenerator,
-)
+from TGLive.helpers.playlist import VideoPlaylistManager
+from TGLive.helpers.playlist.stream_generator import PlaylistStreamGenerator
 from TGLive.helpers.database import JsonPlaylistStore
 from TGLive.helpers.encoding.hls import start_hls_runner
+from TGLive.helpers.encoding.utils import get_last_segment_number
 from TGLive.helpers.process.stop_all import stop_all_ffmpeg
 from TGLive.helpers.streaming.streamer import MultiClientStreamer
 from TGLive.helpers.ext_utils import clean_hls_folder
@@ -46,7 +44,6 @@ async def main():
     # --------------------------------------------------
     worker_id = 10
     client = ClientManager.multi_clients.get(worker_id)
-
     if not client:
         raise RuntimeError(f"Client {worker_id} not found")
 
@@ -72,7 +69,7 @@ async def main():
     await manager.build()
 
     # --------------------------------------------------
-    # STREAM PIPELINE
+    # STREAM PIPELINE (SAFE)
     # --------------------------------------------------
     multi_streamer = MultiClientStreamer()
 
@@ -82,15 +79,50 @@ async def main():
         stream_name="stream1",
     )
 
-    async def run_stream():
-        await start_hls_runner(
-            ts_source=playlist_generator.generator(),
-            hls_dir="hls/stream1",
-            stream_name="stream1",
-        )
+    hls_dir = "hls/stream1"
 
-    stream_task = asyncio.create_task(run_stream())
-    logger.info("HLS stream task started")
+    # --------------------------------------------------
+    # STREAM SUPERVISOR (CRITICAL)
+    # --------------------------------------------------
+    async def stream_supervisor():
+        logger.info("[stream1] Stream supervisor started")
+
+        while not shutdown_event.is_set():
+            try:
+                async for video_id, ts_source in playlist_generator.iter_videos():
+                    if shutdown_event.is_set():
+                        break
+
+                    logger.info("[stream1] Starting video %s", video_id)
+
+                    start_number = get_last_segment_number(hls_dir)
+
+                    # 🔒 STAGE 1 (Cleaner FFmpeg)
+                    # 🔒 STAGE 2 (HLS FFmpeg)
+                    await start_hls_runner(
+                        ts_source=ts_source,   # CLEAN MPEG-TS ONLY
+                        hls_dir=hls_dir,
+                        stream_name="stream1",
+                        start_number=start_number,
+                    )
+
+                    logger.info("[stream1] Finished video %s", video_id)
+
+            except asyncio.CancelledError:
+                logger.warning("[stream1] Stream task cancelled")
+                break
+
+            except Exception as e:
+                logger.exception(
+                    "[stream1] Stream crashed, restarting in 3s: %s",
+                    e,
+                )
+                await asyncio.sleep(3)
+
+        logger.warning("[stream1] Stream supervisor stopped")
+
+    stream_task = asyncio.create_task(stream_supervisor())
+    logger.info("HLS stream supervisor started")
 
     # --------------------------------------------------
     # START WEB SERVER
@@ -108,32 +140,22 @@ async def main():
         shutdown_event.set()
         logger.warning("Shutdown initiated")
 
-        # stop playlist auto checker
         manager.stop()
-
         await multi_streamer.stop()
 
-        # stop stream task
         stream_task.cancel()
         try:
             await stream_task
         except asyncio.CancelledError:
             pass
 
-        # stop ffmpeg BEFORE cleaning
+        # STOP ALL FFMPEG FIRST
         await stop_all_ffmpeg()
 
-        # stop web server
         await stop_server(web_runner)
-
-        # stop telegram clients
         await ClientManager.stop()
 
-        # --------------------------------------------------
-        # CLEAN HLS FOLDER (STOP) ✅
-        # --------------------------------------------------
         clean_hls_folder()
-
         logger.warning("Shutdown completed")
 
     # --------------------------------------------------
@@ -146,7 +168,7 @@ async def main():
                 sig, lambda: asyncio.create_task(shutdown())
             )
         except NotImplementedError:
-            pass  # Windows fallback
+            pass
 
     # --------------------------------------------------
     # BLOCK FOREVER

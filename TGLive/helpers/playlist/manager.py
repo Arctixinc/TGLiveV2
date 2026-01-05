@@ -265,7 +265,7 @@ class VideoPlaylistManager:
             except ValueError:
                 return self.playlist[0]
 
-    def get_playlist(self) -> List[int]:
+    async def get_playlist(self) -> List[int]:
         if self.reverse:
             return self.playlist[::-1]
         return self.playlist

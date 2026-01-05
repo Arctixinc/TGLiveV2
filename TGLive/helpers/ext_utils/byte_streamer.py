@@ -22,7 +22,8 @@ class ByteStreamer:
 
         self.clean_timer = 30 * 60
         self.client: Client = client
-        self.__cached_file_ids: Dict[int, FileId] = {}
+        self.__cached_file_ids: Dict[tuple[int, int], FileId] = {}
+
         
         self._clean_task: asyncio.Task | None = None
         self._running = True
