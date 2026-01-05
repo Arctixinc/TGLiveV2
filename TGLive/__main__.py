@@ -9,7 +9,7 @@ from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
 from TGLive.helpers.client import ClientManager
 from TGLive.helpers.playlist import VideoPlaylistManager
 from TGLive.helpers.playlist.stream_generator import PlaylistStreamGenerator
-from TGLive.helpers.database import JsonPlaylistStore
+from TGLive.helpers.database import JsonPlaylistStore, PostgresPlaylistStore
 from TGLive.helpers.encoding.hls import start_hls_runner
 from TGLive.helpers.encoding.utils import get_last_segment_number
 from TGLive.helpers.process.stop_all import stop_all_ffmpeg
@@ -75,6 +75,7 @@ async def main():
         )
 
         store = JsonPlaylistStore()
+        store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
 
         manager = VideoPlaylistManager(
             client=client,
