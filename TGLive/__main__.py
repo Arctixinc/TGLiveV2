@@ -4,6 +4,8 @@ from asyncio import gather
 from pyrogram import idle
 
 from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
+
+
 from TGLive.helpers.client import ClientManager
 from TGLive.helpers.playlist import VideoPlaylistManager
 from TGLive.helpers.playlist.stream_generator import PlaylistStreamGenerator
@@ -25,6 +27,7 @@ async def main():
     logger.info("Starting %s version %s", __title__, __version__)
 
     shutdown_event = asyncio.Event()
+    stream_tasks = []
 
     # --------------------------------------------------
     # CLEAN HLS FOLDER (START)
@@ -40,89 +43,109 @@ async def main():
     )
 
     # --------------------------------------------------
-    # SELECT A WORKER CLIENT
+    # WORKER POOL (ROUND-ROBIN)
     # --------------------------------------------------
-    worker_id = 10
-    client = ClientManager.multi_clients.get(worker_id)
-    if not client:
-        raise RuntimeError(f"Client {worker_id} not found")
+    worker_ids = list(ClientManager.multi_clients.keys())
+    if not worker_ids:
+        raise RuntimeError("No Telegram worker clients available")
 
-    logger.info(
-        "Using client | index=%s | session=%s | username=%s",
-        worker_id,
-        client.name,
-        getattr(client.me, "username", None),
-    )
+    worker_index = 0
 
     # --------------------------------------------------
-    # PLAYLIST STORE + MANAGER
+    # STREAM STARTER
     # --------------------------------------------------
-    store = JsonPlaylistStore()
+    async def start_stream(stream_index: int, chat_id: int):
+        nonlocal worker_index
 
-    manager = VideoPlaylistManager(
-        client=client,
-        chat_id=Telegram.LOCAL_ID,
-        store=store,
-        auto_checker=True,
-    )
+        stream_name = f"stream{stream_index}"
+        stream_logger = get_logger(stream_name)
 
-    await manager.build()
+        # round-robin worker assignment
+        worker_id = worker_ids[worker_index % len(worker_ids)]
+        worker_index += 1
 
-    # --------------------------------------------------
-    # STREAM PIPELINE (SAFE)
-    # --------------------------------------------------
-    multi_streamer = MultiClientStreamer()
+        client = ClientManager.multi_clients[worker_id]
 
-    playlist_generator = PlaylistStreamGenerator(
-        playlist_manager=manager,
-        multi_streamer=multi_streamer,
-        stream_name="stream1",
-    )
+        stream_logger.info(
+            "[%s] Using worker=%s session=%s username=%s",
+            stream_name,
+            worker_id,
+            client.name,
+            getattr(client.me, "username", None),
+        )
 
-    hls_dir = "hls/stream1"
+        store = JsonPlaylistStore()
 
-    # --------------------------------------------------
-    # STREAM SUPERVISOR (CRITICAL)
-    # --------------------------------------------------
-    async def stream_supervisor():
-        logger.info("[stream1] Stream supervisor started")
+        manager = VideoPlaylistManager(
+            client=client,
+            chat_id=chat_id,
+            store=store,
+            auto_checker=True,
+        )
+        await manager.build()
 
-        while not shutdown_event.is_set():
-            try:
-                async for video_id, ts_source in playlist_generator.iter_videos():
-                    if shutdown_event.is_set():
-                        break
+        multi_streamer = MultiClientStreamer()
 
-                    logger.info("[stream1] Starting video %s", video_id)
+        playlist_generator = PlaylistStreamGenerator(
+            playlist_manager=manager,
+            multi_streamer=multi_streamer,
+            stream_name=stream_name,
+        )
 
-                    start_number = get_last_segment_number(hls_dir)
+        hls_dir = f"hls/{stream_name}"
 
-                    # 🔒 STAGE 1 (Cleaner FFmpeg)
-                    # 🔒 STAGE 2 (HLS FFmpeg)
-                    await start_hls_runner(
-                        ts_source=ts_source,   # CLEAN MPEG-TS ONLY
-                        hls_dir=hls_dir,
-                        stream_name="stream1",
-                        start_number=start_number,
+        async def supervisor():
+            stream_logger.info("[%s] Supervisor started", stream_name)
+
+            while not shutdown_event.is_set():
+                try:
+                    async for video_id, ts_source in playlist_generator.iter_videos():
+                        if shutdown_event.is_set():
+                            break
+
+                        stream_logger.info(
+                            "[%s] Starting video %s",
+                            stream_name,
+                            video_id,
+                        )
+
+                        start_number = get_last_segment_number(hls_dir)
+
+                        await start_hls_runner(
+                            ts_source=ts_source,
+                            hls_dir=hls_dir,
+                            stream_name=stream_name,
+                            start_number=start_number,
+                        )
+
+                        stream_logger.info(
+                            "[%s] Finished video %s",
+                            stream_name,
+                            video_id,
+                        )
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    stream_logger.exception(
+                        "[%s] Stream crashed, restarting in 3s: %s",
+                        stream_name,
+                        e,
                     )
+                    await asyncio.sleep(3)
 
-                    logger.info("[stream1] Finished video %s", video_id)
+            stream_logger.warning("[%s] Supervisor stopped", stream_name)
 
-            except asyncio.CancelledError:
-                logger.warning("[stream1] Stream task cancelled")
-                break
+        return asyncio.create_task(supervisor())
 
-            except Exception as e:
-                logger.exception(
-                    "[stream1] Stream crashed, restarting in 3s: %s",
-                    e,
-                )
-                await asyncio.sleep(3)
+    # --------------------------------------------------
+    # START ALL STREAMS (stream1, stream2, ...)
+    # --------------------------------------------------
+    for i, chat_id in enumerate(Telegram.STREAM_DB_IDS, start=1):
+        task = await start_stream(i, chat_id)
+        stream_tasks.append(task)
 
-        logger.warning("[stream1] Stream supervisor stopped")
-
-    stream_task = asyncio.create_task(stream_supervisor())
-    logger.info("HLS stream supervisor started")
+    logger.info("Started %d streams", len(stream_tasks))
 
     # --------------------------------------------------
     # START WEB SERVER
@@ -140,18 +163,14 @@ async def main():
         shutdown_event.set()
         logger.warning("Shutdown initiated")
 
-        manager.stop()
-        await multi_streamer.stop()
+        for task in stream_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-        stream_task.cancel()
-        try:
-            await stream_task
-        except asyncio.CancelledError:
-            pass
-
-        # STOP ALL FFMPEG FIRST
         await stop_all_ffmpeg()
-
         await stop_server(web_runner)
         await ClientManager.stop()
 
