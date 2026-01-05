@@ -83,6 +83,7 @@ class PostgresPlaylistStore:
         chat_id: int | str,
         new_ids: List[int],
         reverse: bool = False,
+        channel_name: str | None = None,
     ):
         if not new_ids:
             return
@@ -94,9 +95,9 @@ class PostgresPlaylistStore:
             await conn.execute(
                 """
                 INSERT INTO playlists
-                    (chat_id, playlist, latest_id, reverse, updated_at)
+                    (chat_id, playlist, latest_id, reverse, channel_name, updated_at)
                 VALUES
-                    ($1, $2, $3, $4, $5)
+                    ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (chat_id)
                 DO UPDATE SET
                     playlist = playlists.playlist ||
@@ -107,15 +108,16 @@ class PostgresPlaylistStore:
                         ),
                     latest_id = GREATEST(playlists.latest_id, EXCLUDED.latest_id),
                     reverse = EXCLUDED.reverse,
+                    channel_name = COALESCE(EXCLUDED.channel_name, playlists.channel_name),
                     updated_at = EXCLUDED.updated_at
                 """,
                 str(chat_id),
                 new_ids,
                 latest,
                 reverse,
+                channel_name,
                 int(time.time()),
             )
-
         log.info(
             "append: chat=%s added=%s latest_id=%s reverse=%s",
             chat_id,

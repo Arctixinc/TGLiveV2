@@ -74,8 +74,8 @@ async def main():
             getattr(client.me, "username", None),
         )
 
-        store = JsonPlaylistStore()
-        # store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
+        # store = JsonPlaylistStore()
+        store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
 
         manager = VideoPlaylistManager(
             client=client,
