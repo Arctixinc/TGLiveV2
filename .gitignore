@@ -3,6 +3,5 @@ log.txt
 __pycache__/
 *.pyc
 */sessions
-playlists.json
 merge_for_ai*
 merged_for_ai*
