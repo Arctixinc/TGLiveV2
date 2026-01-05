@@ -60,7 +60,13 @@ class Telegram:
         DB_CHANNEL_ID,
         FAMILY_GUY_ID,
         BEN_ID,
+        DORAEMON_ID,
+        NARUTO_ID,
+        NATIA_ID,
+        PANDF_ID,
+        LOCAL_ID,
     ]
+
 
 
 
