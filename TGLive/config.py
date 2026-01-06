@@ -67,9 +67,7 @@ class Telegram:
     #     LOCAL_ID,
     # ]
     STREAM_DB_IDS = [
-        FAMILY_GUY_ID,
         BEN_ID,
-        NATIA_ID,
         PANDF_ID
     ]
 
