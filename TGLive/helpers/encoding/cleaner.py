@@ -7,6 +7,7 @@ LOGGER = get_logger(__name__)
 async def ffmpeg_cleaner(byte_source, stream_name):
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg",
+        "-threads", "1",
         "-loglevel", "error",
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
