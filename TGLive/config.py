@@ -30,6 +30,7 @@ class Telegram:
     NATIA_ID = int(getenv("NATIA_ID", "-1003551915792"))
     PANDF_ID = int(getenv("PANDF_ID", "-1003577274228"))
     LOCAL_ID = int(getenv("LOCAL_ID", "-1003613880985"))
+    DORAEMON_JAP_ID = int(getenv("DORAEMON_JAP_ID", "-1003355392248"))
     
     MULTI_TOKEN1="8461823650:AAFGAtLCt-9Nn1sLZ73G0slCFm6wySrfZmM"
     MULTI_TOKEN2="8379790965:AAFVLnEcB2nTCpYoZ50jevejPIWXggrciQ0"
@@ -65,6 +66,7 @@ class Telegram:
         NATIA_ID,
         PANDF_ID,
         LOCAL_ID,
+        DORAEMON_JAP_ID
     ]
     # STREAM_DB_IDS = [
     #     BEN_ID,
