@@ -38,15 +38,17 @@ async def start_hls_runner(
         "-map", "0:a?",
 
         # Video → H.264 (stable for HLS)
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "baseline",
-        "-level", "3.1",
-        "-g", "48",
-        "-sc_threshold", "0",
-        "-keyint_min", "48",
+        # "-c:v", "libx264",
+        # "-preset", "veryfast",
+        # "-pix_fmt", "yuv420p",
+        # "-profile:v", "baseline",
+        # "-level", "3.1",
+        # "-g", "48",
+        # "-sc_threshold", "0",
+        # "-keyint_min", "48",
 
+        "-c:v", "copy",
+        
         # Audio → AAC
         "-c:a", "aac",
         "-b:a", "128k",
