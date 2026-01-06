@@ -1,5 +1,7 @@
+import os
 import asyncio
 import signal
+import subprocess
 from asyncio import gather
 from pyrogram import idle
 
@@ -18,7 +20,18 @@ from TGLive.helpers.ext_utils import clean_hls_folder
 from TGLive.web.server import start_server, stop_server
 
 
+
+def run_supdate():
+    subprocess.run(
+        [os.sys.executable, "update.py"], check=False
+    )
+
 async def main():
+    # --------------------------------------------------
+    # SELF UPDATE
+    # --------------------------------------------------
+    run_supdate()
+    
     # --------------------------------------------------
     # LOGGING
     # --------------------------------------------------
