@@ -46,6 +46,15 @@ async def main():
     # CLEAN HLS FOLDER (START)
     # --------------------------------------------------
     clean_hls_folder()
+    
+    
+    
+    # --------------------------------------------------
+    # START WEB SERVER
+    # --------------------------------------------------
+    
+    web_runner = await start_server(port=Telegram.PORT)
+    logger.info("Web server started on port %s", Telegram.PORT)
 
     # --------------------------------------------------
     # START TELEGRAM CLIENTS
@@ -87,8 +96,8 @@ async def main():
             getattr(client.me, "username", None),
         )
 
-        # store = JsonPlaylistStore()
-        store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
+        store = JsonPlaylistStore()
+        # store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
 
         manager = VideoPlaylistManager(
             client=client,
@@ -161,11 +170,7 @@ async def main():
 
     logger.info("Started %d streams", len(stream_tasks))
 
-    # --------------------------------------------------
-    # START WEB SERVER
-    # --------------------------------------------------
-    web_runner = await start_server(port=Telegram.PORT)
-    logger.info("Web server started on port %s", Telegram.PORT)
+    
 
     # --------------------------------------------------
     # GRACEFUL SHUTDOWN
