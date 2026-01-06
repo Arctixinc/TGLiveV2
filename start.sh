@@ -1,1 +1,1 @@
-python -m TGLive
+python update.py && python -m TGLive
