@@ -3,4 +3,4 @@ build:
     web: Dockerfile
 
 run:
-  web: python -m TGLive
+  web: bash start.sh

@@ -40,7 +40,7 @@ async def ffmpeg_cleaner(byte_source, stream_name):
 
     try:
         while True:
-            data = await proc.stdout.read(188 * 256)
+            data = await proc.stdout.read(188 * 64)
             if not data:
                 break
             yield data
