@@ -11,7 +11,7 @@ from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
 from TGLive.helpers.client import ClientManager
 from TGLive.helpers.playlist import VideoPlaylistManager
 from TGLive.helpers.playlist.stream_generator import PlaylistStreamGenerator
-from TGLive.helpers.database import JsonPlaylistStore, PostgresPlaylistStore
+from TGLive.helpers.database import JsonPlaylistStore, PostgresPlaylistStore, MongoPlaylistStore
 from TGLive.helpers.encoding.hls import start_hls_runner
 from TGLive.helpers.encoding.utils import get_last_segment_number
 from TGLive.helpers.process.stop_all import stop_all_ffmpeg
@@ -97,7 +97,8 @@ async def main():
         )
 
         # store = JsonPlaylistStore()
-        store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
+        # store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
+        store = MongoPlaylistStore(Telegram.DATABASE_URL, "TGLive2")
 
         manager = VideoPlaylistManager(
             client=client,
@@ -165,7 +166,8 @@ async def main():
     # START ALL STREAMS (stream1, stream2, ...)
     # --------------------------------------------------
     for i, chat_id in enumerate(Telegram.STREAM_DB_IDS, start=1):
-        task = await start_stream(i, chat_id)
+        task = asyncio.create_task(start_stream(i, chat_id))
+        # task = await start_stream(i, chat_id)
         stream_tasks.append(task)
 
     logger.info("Started %d streams", len(stream_tasks))

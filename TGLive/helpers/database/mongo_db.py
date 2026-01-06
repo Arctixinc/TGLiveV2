@@ -12,7 +12,7 @@ class MongoPlaylistStore:
         self.db = self.client[db_name]
         self.col = self.db.playlists
 
-        self.col.create_index("_id", unique=True)
+        # self.col.create_index("_id", unique=True)
         log.info("mongo store ready (%s)", db_name)
 
     async def load(self, chat_id: int | str) -> Optional[Dict]:

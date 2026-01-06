@@ -3,5 +3,6 @@ log.txt
 __pycache__/
 *.pyc
 */sessions
+temp.py
 merge_for_ai*
 merged_for_ai*
