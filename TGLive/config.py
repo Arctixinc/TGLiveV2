@@ -56,20 +56,20 @@ class Telegram:
     DEBUG_MODE = getenv("DEBUG_MODE", "False").lower() == "true"
     
     
-    # STREAM_DB_IDS = [
-    #     DB_CHANNEL_ID,
-    #     FAMILY_GUY_ID,
-    #     BEN_ID,
-    #     DORAEMON_ID,
-    #     NARUTO_ID,
-    #     NATIA_ID,
-    #     PANDF_ID,
-    #     LOCAL_ID,
-    # ]
     STREAM_DB_IDS = [
+        DB_CHANNEL_ID,
+        FAMILY_GUY_ID,
         BEN_ID,
-        PANDF_ID
+        DORAEMON_ID,
+        NARUTO_ID,
+        NATIA_ID,
+        PANDF_ID,
+        LOCAL_ID,
     ]
+    # STREAM_DB_IDS = [
+    #     BEN_ID,
+    #     PANDF_ID
+    # ]
 
 
 
