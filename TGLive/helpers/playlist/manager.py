@@ -8,7 +8,7 @@ from .base import PlaylistStore
 log = get_logger(__name__)
 
 # ============================================================
-# GLOBAL SCAN LOCK (VERY IMPORTANT)
+# GLOBAL SCAN LOCK
 # ============================================================
 SCAN_SEMAPHORE = asyncio.Semaphore(1)
 
@@ -16,7 +16,8 @@ SCAN_SEMAPHORE = asyncio.Semaphore(1)
 class VideoPlaylistManager:
     """
     Playlist Manager (DB-agnostic)
-    FloodWait-safe version
+    FloodWait-safe
+    Restart-safe
     """
 
     def __init__(
@@ -49,9 +50,28 @@ class VideoPlaylistManager:
         self.preloaded_playlist = preloaded_playlist
         self.channel_name: Optional[str] = None
 
-    def stop(self):
+        # 🔥 task tracking (FIX)
+        self._auto_task: Optional[asyncio.Task] = None
+        self._delayed_task: Optional[asyncio.Task] = None
+
+    # ============================================================
+    # STOP (CRITICAL FOR RESTARTS)
+    # ============================================================
+    async def stop(self):
         self.running = False
-        log.debug("auto-checker stopped")
+
+        for task in (self._auto_task, self._delayed_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        self._auto_task = None
+        self._delayed_task = None
+
+        log.debug("auto-checker fully stopped")
 
     # ============================================================
     # SAFE ITERATOR (THROTTLED)
@@ -66,7 +86,7 @@ class VideoPlaylistManager:
                         offset=offset_id,
                     ):
                         yield msg
-                        await asyncio.sleep(0.02)  # 🔥 floodwait killer
+                        await asyncio.sleep(0.02)
                     break
 
                 except FloodWait as e:
@@ -87,12 +107,16 @@ class VideoPlaylistManager:
         except Exception:
             self.channel_name = str(self.chat_id)
 
-        # 1️⃣ PRELOADED
+        # 1️⃣ PRELOADED PLAYLIST
         if self.preloaded_playlist:
             async with self.lock:
                 self.playlist = list(self.preloaded_playlist)
                 self.latest_id = max(self.playlist) if self.playlist else 0
-            log.warning("using preloaded playlist (%s items)", len(self.playlist))
+
+            log.warning(
+                "using preloaded playlist (%s items)",
+                len(self.playlist),
+            )
             return
 
         # 2️⃣ LOAD FROM DB
@@ -112,10 +136,12 @@ class VideoPlaylistManager:
             )
 
             if self.auto_checker:
-                asyncio.create_task(self._delayed_auto_start())
+                self._delayed_task = asyncio.create_task(
+                    self._delayed_auto_start()
+                )
             return
 
-        # 3️⃣ FIRST TELEGRAM SCAN (2K ONLY)
+        # 3️⃣ FIRST TELEGRAM SCAN (CHUNKED)
         log.info("building playlist from Telegram (first run)…")
 
         temp: List[int] = []
@@ -134,7 +160,7 @@ class VideoPlaylistManager:
                 latest = max(latest, msg.id)
 
             if scanned % 200 == 0:
-                await asyncio.sleep(1)  # 🔥 cooldown per chunk
+                await asyncio.sleep(1)
 
         async with self.lock:
             self.playlist = temp
@@ -154,13 +180,15 @@ class VideoPlaylistManager:
         )
 
         if self.auto_checker:
-            asyncio.create_task(self._delayed_auto_start())
+            self._delayed_task = asyncio.create_task(
+                self._delayed_auto_start()
+            )
 
     # ============================================================
     # AUTO CHECKER
     # ============================================================
     async def _delayed_auto_start(self):
-        await asyncio.sleep(30)  # 🔥 prevents startup burst
+        await asyncio.sleep(30)
         await self.start_auto_update()
 
     async def start_auto_update(self):
@@ -169,18 +197,21 @@ class VideoPlaylistManager:
 
         self.running = True
         log.info("auto-checker started (%ss)", self.check_interval)
-        asyncio.create_task(self._auto_loop())
+
+        self._auto_task = asyncio.create_task(self._auto_loop())
 
     async def _auto_loop(self):
-        while self.running:
-            try:
+        try:
+            while self.running:
                 await self.check_for_updates()
-            except Exception as e:
-                log.error("auto-update error: %s", e)
-            await asyncio.sleep(self.check_interval)
+                await asyncio.sleep(self.check_interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            log.debug("auto-checker loop exited")
 
     # ============================================================
-    # INCREMENTAL UPDATE (FIXED)
+    # INCREMENTAL UPDATE
     # ============================================================
     async def check_for_updates(self):
         new_ids: List[int] = []
@@ -206,10 +237,8 @@ class VideoPlaylistManager:
         if not new_ids:
             return
 
-        new_ids = sorted(set(new_ids))
-
         async with self.lock:
-            new_ids = [i for i in new_ids if i not in self.playlist]
+            new_ids = [i for i in set(new_ids) if i not in self.playlist]
             if not new_ids:
                 return
 
@@ -224,14 +253,13 @@ class VideoPlaylistManager:
         )
 
         log.info(
-            "added %s new videos (total=%s, latest_id=%s)",
+            "added %s new videos (total=%s)",
             len(new_ids),
             len(self.playlist),
-            self.latest_id,
         )
 
     # ============================================================
-    # PLAYBACK HELPERS
+    # PLAYBACK HELPERS (UNCHANGED)
     # ============================================================
     async def remove_video(self, message_id: int):
         async with self.lock:

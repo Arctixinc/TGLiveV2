@@ -9,15 +9,16 @@ from TGLive import setup_logging, get_logger, __title__, __version__, Telegram
 from TGLive.helpers.client import ClientManager
 from TGLive.helpers.playlist import VideoPlaylistManager
 from TGLive.helpers.playlist.stream_generator import PlaylistStreamGenerator
-from TGLive.helpers.database import JsonPlaylistStore, MongoPlaylistStore
+from TGLive.helpers.database import MongoPlaylistStore
 from TGLive.helpers.encoding.hls import start_hls_runner, stop_all_hls
+from TGLive.helpers.encoding.cleaner import stop_cleaner
 from TGLive.helpers.process.stop_all import stop_all_ffmpeg
 from TGLive.helpers.streaming.streamer import MultiClientStreamer
 from TGLive.helpers.ext_utils import clean_hls_folder
 from TGLive.web.server import start_server, stop_server
 
 
-STREAM_STUCK_TIMEOUT = 20   # seconds (no TS activity)
+STREAM_STUCK_TIMEOUT = 20   # seconds without TS
 STREAM_RESTART_DELAY = 5   # seconds before restart
 
 
@@ -33,8 +34,11 @@ async def run_stream_once(stream_name: str, chat_id: int, shutdown_event: asynci
         raise RuntimeError("No Telegram worker clients available")
 
     client = ClientManager.multi_clients[worker_ids[0]]
-
     store = MongoPlaylistStore(Telegram.DATABASE_URL, "TGLive2")
+
+    manager = None
+    ffmpeg = None
+    watchdog_task = None
 
     manager = VideoPlaylistManager(
         client=client,
@@ -51,8 +55,6 @@ async def run_stream_once(stream_name: str, chat_id: int, shutdown_event: asynci
     )
 
     hls_dir = f"hls/{stream_name}"
-    ffmpeg = None
-
     last_activity = asyncio.get_running_loop().time()
 
     async def watchdog():
@@ -80,7 +82,6 @@ async def run_stream_once(stream_name: str, chat_id: int, shutdown_event: asynci
             async for chunk in ts_source:
                 if shutdown_event.is_set():
                     break
-
                 try:
                     ffmpeg.stdin.write(chunk)
                     ffmpeg.stdin.flush()
@@ -89,11 +90,15 @@ async def run_stream_once(stream_name: str, chat_id: int, shutdown_event: asynci
                     raise RuntimeError("FFmpeg pipe broken")
 
     finally:
-        try:
+        # stop watchdog
+        if watchdog_task:
             watchdog_task.cancel()
-        except Exception:
-            pass
 
+        # 🔥 STOP AUTO-CHECKER TASKS (CRITICAL)
+        if manager:
+            await manager.stop()
+
+        # 🔥 STOP FFmpeg
         if ffmpeg:
             try:
                 if ffmpeg.stdin:
@@ -101,6 +106,9 @@ async def run_stream_once(stream_name: str, chat_id: int, shutdown_event: asynci
                 await asyncio.wait_for(ffmpeg.wait(), timeout=5)
             except Exception:
                 ffmpeg.kill()
+
+        # 🔥 STOP CLEANER FFmpeg
+        await stop_cleaner(stream_name)
 
         logger.warning("[%s] Stream stopped", stream_name)
 
