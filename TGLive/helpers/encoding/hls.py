@@ -1,16 +1,17 @@
 import os
+import subprocess
 from TGLive import get_logger
 from TGLive.helpers.encoding.ffmpeg import FFmpegProcess
 
 LOGGER = get_logger(__name__)
 
 
-async def start_hls_runner(
-    ts_source,
-    hls_dir: str,
-    stream_name: str,
-    start_number: int,
-):
+_hls_processes: dict[str, subprocess.Popen] = {}
+
+async def start_hls_runner(hls_dir: str, stream_name: str) -> subprocess.Popen:
+    if stream_name in _hls_processes:
+        return _hls_processes[stream_name]
+
     os.makedirs(hls_dir, exist_ok=True)
 
     playlist_path = os.path.join(hls_dir, "live.m3u8")
@@ -18,63 +19,52 @@ async def start_hls_runner(
 
     cmd = [
         "ffmpeg",
-        "-y",
-
-        # 🔒 REAL-TIME pacing (MUST be before -i)
-        "-re",
-
-        "-threads", "1",
         "-loglevel", "error",
-
-        # INPUT: CLEAN MPEG-TS
-        "-f", "mpegts",
-        "-fflags", "+genpts+igndts",
-        "-analyzeduration", "100M",
-        "-probesize", "100M",
+        "-re",
+        "-threads", "1",
+        "-fflags", "+genpts",
         "-i", "pipe:0",
-
-        # Mapping
-        "-map", "0:v:0?",
+        "-map", "0:v:0",
         "-map", "0:a?",
-
-        # Video → H.264 (stable for HLS)
-        # "-c:v", "libx264",
-        # "-preset", "veryfast",
-        # "-pix_fmt", "yuv420p",
-        # "-profile:v", "baseline",
-        # "-level", "3.1",
-        # "-g", "48",
-        # "-sc_threshold", "0",
-        # "-keyint_min", "48",
-
         "-c:v", "copy",
-        
-        # Audio → AAC
         "-c:a", "aac",
         "-b:a", "128k",
         "-ac", "2",
-
-        # HLS
         "-f", "hls",
         "-hls_time", "4",
-        "-hls_list_size", "10",
+        "-hls_list_size", "6",
         "-hls_flags",
         "delete_segments+append_list+omit_endlist+independent_segments",
 
-        # Segment continuity
-        "-start_number", str(start_number),
         "-hls_segment_filename", segment_pattern,
-
         playlist_path,
     ]
+    
+    LOGGER.info("[%s] Starting persistent FFmpeg", stream_name)
+    
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
 
-    ff = FFmpegProcess(cmd, stream_name)
-    await ff.start()
+    _hls_processes[stream_name] = proc
+    return proc
 
-    try:
-        async for chunk in ts_source:
-            if not await ff.write(chunk):
-                break
-    finally:
-        await ff.stop()
-        LOGGER.info("[%s] HLS ffmpeg stopped cleanly", stream_name)
+    
+    
+async def stop_all_hls():
+    """
+    Stop ALL FFmpeg processes cleanly (used on shutdown).
+    """
+    for name, proc in _hls_processes.items():
+        try:
+            LOGGER.warning("[%s] Stopping FFmpeg", name)
+            if proc.stdin:
+                proc.stdin.close()
+            proc.terminate()
+        except Exception:
+            pass
+
+    _hls_processes.clear()
