@@ -96,9 +96,9 @@ async def main():
             getattr(client.me, "username", None),
         )
 
-        # store = JsonPlaylistStore()
+        store = JsonPlaylistStore()
         # store = PostgresPlaylistStore(Telegram.POSTGRES_URL)
-        store = MongoPlaylistStore(Telegram.DATABASE_URL, "TGLive2")
+        # store = MongoPlaylistStore(Telegram.DATABASE_URL, "TGLive2")
 
         manager = VideoPlaylistManager(
             client=client,

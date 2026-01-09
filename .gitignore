@@ -2,7 +2,8 @@ hls/
 log.txt
 __pycache__/
 *.pyc
-*/sessions
+*/sessions/
+.env
 temp.py
 merge_for_ai*
 merged_for_ai*

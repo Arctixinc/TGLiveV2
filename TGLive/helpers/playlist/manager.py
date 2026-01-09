@@ -7,17 +7,16 @@ from .base import PlaylistStore
 
 log = get_logger(__name__)
 
+# ============================================================
+# GLOBAL SCAN LOCK (VERY IMPORTANT)
+# ============================================================
+SCAN_SEMAPHORE = asyncio.Semaphore(1)
+
 
 class VideoPlaylistManager:
     """
     Playlist Manager (DB-agnostic)
-
-    Storage order (DB):
-        OLD → NEW
-
-    Playback:
-        reverse = False → OLD → NEW
-        reverse = True  → NEW → OLD
+    FloodWait-safe version
     """
 
     def __init__(
@@ -54,52 +53,50 @@ class VideoPlaylistManager:
         self.running = False
         log.debug("auto-checker stopped")
 
+    # ============================================================
+    # SAFE ITERATOR (THROTTLED)
+    # ============================================================
     async def safe_iter_messages(self, limit: int, offset_id: int = 0):
-        while True:
-            try:
-                async for msg in self.client.iter_messages(
-                    self.chat_id,
-                    limit=limit,
-                    offset=offset_id,
-                ):
-                    yield msg
-                break
+        async with SCAN_SEMAPHORE:
+            while True:
+                try:
+                    async for msg in self.client.iter_messages(
+                        self.chat_id,
+                        limit=limit,
+                        offset=offset_id,
+                    ):
+                        yield msg
+                        await asyncio.sleep(0.02)  # 🔥 floodwait killer
+                    break
 
-            except FloodWait as e:
-                log.warning("FloodWait %ss", e.value)
-                await asyncio.sleep(e.value)
+                except FloodWait as e:
+                    log.warning("FloodWait %ss", e.value)
+                    await asyncio.sleep(e.value + 1)
 
-            except Exception as e:
-                log.error("iter_messages error: %s", e)
-                break
+                except Exception as e:
+                    log.error("iter_messages error: %s", e)
+                    break
 
+    # ============================================================
+    # BUILD PLAYLIST
+    # ============================================================
     async def build(self):
-        """
-        Build playlist:
-        - preload OR
-        - load from DB OR
-        - first Telegram scan (once)
-        """
-
-        # fetch channel name once
         try:
             chat = await self.client.get_chat(self.chat_id)
             self.channel_name = chat.title or chat.username or str(self.chat_id)
         except Exception:
             self.channel_name = str(self.chat_id)
 
-        # 1️⃣ PRELOADED PLAYLIST
+        # 1️⃣ PRELOADED
         if self.preloaded_playlist:
             async with self.lock:
                 self.playlist = list(self.preloaded_playlist)
                 self.latest_id = max(self.playlist) if self.playlist else 0
-
             log.warning("using preloaded playlist (%s items)", len(self.playlist))
             return
 
-        # 2️⃣ LOAD FROM DB (SOURCE OF TRUTH)
+        # 2️⃣ LOAD FROM DB
         data = await self.store.load(self.chat_id)
-
         if data:
             async with self.lock:
                 self.playlist = data.get("playlist", [])
@@ -115,16 +112,19 @@ class VideoPlaylistManager:
             )
 
             if self.auto_checker:
-                await self.start_auto_update()
+                asyncio.create_task(self._delayed_auto_start())
             return
 
-        # 3️⃣ FIRST TELEGRAM SCAN (ONLY ONCE)
+        # 3️⃣ FIRST TELEGRAM SCAN (2K ONLY)
         log.info("building playlist from Telegram (first run)…")
 
         temp: List[int] = []
         latest = 0
+        scanned = 0
 
         async for msg in self.safe_iter_messages(limit=2000):
+            scanned += 1
+
             if msg.video or (
                 msg.document
                 and msg.document.mime_type
@@ -132,6 +132,9 @@ class VideoPlaylistManager:
             ):
                 temp.append(msg.id)
                 latest = max(latest, msg.id)
+
+            if scanned % 200 == 0:
+                await asyncio.sleep(1)  # 🔥 cooldown per chunk
 
         async with self.lock:
             self.playlist = temp
@@ -151,7 +154,14 @@ class VideoPlaylistManager:
         )
 
         if self.auto_checker:
-            await self.start_auto_update()
+            asyncio.create_task(self._delayed_auto_start())
+
+    # ============================================================
+    # AUTO CHECKER
+    # ============================================================
+    async def _delayed_auto_start(self):
+        await asyncio.sleep(30)  # 🔥 prevents startup burst
+        await self.start_auto_update()
 
     async def start_auto_update(self):
         if self.running or self.preloaded_playlist:
@@ -169,19 +179,19 @@ class VideoPlaylistManager:
                 log.error("auto-update error: %s", e)
             await asyncio.sleep(self.check_interval)
 
+    # ============================================================
+    # INCREMENTAL UPDATE (FIXED)
+    # ============================================================
     async def check_for_updates(self):
-        """
-        Incremental update:
-        - start from latest_id + 1
-        - scan max 500 messages
-        """
-
         new_ids: List[int] = []
         start = self.latest_id + 1
         end = start + 500
         local_latest = self.latest_id
 
-        async for msg in self.safe_iter_messages(limit=end, offset_id=start):
+        async for msg in self.safe_iter_messages(
+            limit=end,
+            offset_id=start,
+        ):
             if msg.id <= self.latest_id:
                 continue
 
@@ -219,18 +229,10 @@ class VideoPlaylistManager:
             len(self.playlist),
             self.latest_id,
         )
-        
-    async def manual_update(self):
-        if self.preloaded_playlist:
-            return
-        log.info("manual update triggered")
 
-        try:
-            await self.check_for_updates()
-            log.info("manual update finished")
-        except Exception as e:
-            log.error("manual update failed: %s", e)
-
+    # ============================================================
+    # PLAYBACK HELPERS
+    # ============================================================
     async def remove_video(self, message_id: int):
         async with self.lock:
             if message_id in self.playlist:
@@ -248,7 +250,7 @@ class VideoPlaylistManager:
         async with self.lock:
             if not self.playlist:
                 return None
-            
+
             size = len(self.playlist)
 
             if current_id is None:
@@ -261,11 +263,9 @@ class VideoPlaylistManager:
 
             try:
                 idx = self.playlist.index(current_id)
-                return self.playlist[(idx + 1) % len(self.playlist)]
+                return self.playlist[(idx + 1) % size]
             except ValueError:
                 return self.playlist[0]
 
     async def get_playlist(self) -> List[int]:
-        if self.reverse:
-            return self.playlist[::-1]
-        return self.playlist
+        return self.playlist[::-1] if self.reverse else self.playlist

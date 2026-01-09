@@ -34,7 +34,7 @@ async def start_hls_runner(
         "-i", "pipe:0",
 
         # Mapping
-        "-map", "0:v:0",
+        "-map", "0:v:0?",
         "-map", "0:a?",
 
         # Video → H.264 (stable for HLS)

@@ -12,7 +12,7 @@ async def ffmpeg_cleaner(byte_source, stream_name):
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
         "-i", "pipe:0",
-        "-map", "0:v:0",
+        "-map", "0:v:0?",
         "-map", "0:a?",
         "-c:v", "copy",
         "-c:a", "aac",

@@ -54,23 +54,28 @@ class Telegram:
         525, 524, 523, 522, 521, 520, 519, 518, 517, 516,
     ]
     
-    DEBUG_MODE = getenv("DEBUG_MODE", "False").lower() == "true"
+    DEBUG_MODE = getenv("DEBUG_MODE", "True").lower() == "true"
     
     
+    # STREAM_DB_IDS = [
+    #     DB_CHANNEL_ID,
+    #     FAMILY_GUY_ID,
+    #     BEN_ID,
+    #     DORAEMON_ID,
+    #     NARUTO_ID,
+    #     NATIA_ID,
+    #     PANDF_ID,
+    #     LOCAL_ID,
+    #     DORAEMON_JAP_ID
+    # ]
     STREAM_DB_IDS = [
-        DB_CHANNEL_ID,
-        FAMILY_GUY_ID,
-        BEN_ID,
-        DORAEMON_ID,
-        NARUTO_ID,
-        NATIA_ID,
-        PANDF_ID,
-        LOCAL_ID,
-        DORAEMON_JAP_ID
+        DORAEMON_JAP_ID,
     ]
     # STREAM_DB_IDS = [
     #     BEN_ID,
-    #     PANDF_ID
+    #     PANDF_ID,
+    #     DORAEMON_JAP_ID,
+    #     LOCAL_ID
     # ]
 
 
